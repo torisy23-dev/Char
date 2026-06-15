@@ -1,78 +1,124 @@
-import { useState } from 'react';
-import BottomNav from './components/BottomNav';
-import { useGameProgress } from './hooks/useGameProgress';
-import HomeScreen, { type GameKey } from './screens/HomeScreen';
-import GamesScreen from './screens/GamesScreen';
-import StatsScreen from './screens/StatsScreen';
-import PredictMode from './games/PredictMode';
-import EntryGame from './games/EntryGame';
-import SupResGame from './games/SupResGame';
-import TrendGame from './games/TrendGame';
-import PatternQuiz from './games/PatternQuiz';
-import ReplayMode from './games/ReplayMode';
+import { useMemo, useState } from 'react';
+import CandleChart from '../components/CandleChart';
+import ResultPanel from '../components/ResultPanel';
+import ScreenHeader from '../components/ScreenHeader';
+import { getRandomChartSet } from '../data/chartData';
+import type { useGameProgress } from '../hooks/useGameProgress';
 
-export type ScreenKey =
-  | 'home'
-  | 'games'
-  | 'replay'
-  | 'stats'
-  | 'predict'
-  | 'entry'
-  | 'supres'
-  | 'trend'
-  | 'pattern';
+const PAST_LENGTH = 100;
+const FUTURE_LENGTH = 10;
 
-const TAB_KEYS: ScreenKey[] = ['home', 'games', 'replay', 'stats'];
+interface PredictModeProps {
+  progress: ReturnType<typeof useGameProgress>;
+  onBack: () => void;
+}
 
-export default function App() {
-  const progress = useGameProgress();
-  const [screen, setScreen] = useState<ScreenKey>('home');
+export default function PredictMode({ progress, onBack }: PredictModeProps) {
+  const [chartSet, setChartSet] = useState(() => getRandomChartSet());
+  const [answer, setAnswer] = useState<'buy' | 'sell' | null>(null);
+  const [showResult, setShowResult] = useState(false);
 
-  const handleStartGame = (game: GameKey) => setScreen(game);
-  const backToGames = () => setScreen('games');
+  const pastCandles = useMemo(() => chartSet.candles.slice(0, PAST_LENGTH), [chartSet]);
+  const fullCandles = useMemo(
+    () => chartSet.candles.slice(0, PAST_LENGTH + FUTURE_LENGTH),
+    [chartSet]
+  );
 
-  let content: React.ReactNode;
+  const visibleCandles = showResult ? fullCandles : pastCandles;
 
-  switch (screen) {
-    case 'home':
-      content = (
-        <HomeScreen progress={progress} onNavigate={setScreen} onStartGame={handleStartGame} />
-      );
-      break;
-    case 'games':
-      content = <GamesScreen onBack={() => setScreen('home')} onStartGame={handleStartGame} />;
-      break;
-    case 'stats':
-      content = <StatsScreen progress={progress} />;
-      break;
-    case 'replay':
-      content = <ReplayMode onBack={() => setScreen('home')} />;
-      break;
-    case 'predict':
-      content = <PredictMode progress={progress} onBack={backToGames} />;
-      break;
-    case 'entry':
-      content = <EntryGame progress={progress} onBack={backToGames} />;
-      break;
-    case 'supres':
-      content = <SupResGame progress={progress} onBack={backToGames} />;
-      break;
-    case 'trend':
-      content = <TrendGame progress={progress} onBack={backToGames} />;
-      break;
-    case 'pattern':
-      content = <PatternQuiz progress={progress} onBack={backToGames} />;
-      break;
-    default:
-      content = null;
+  const correct = useMemo(() => {
+    if (!answer) return false;
+    const lastPast = pastCandles[pastCandles.length - 1];
+    const future = fullCandles[fullCandles.length - 1];
+    const went = future.close >= lastPast.close ? 'buy' : 'sell';
+    return went === answer;
+  }, [answer, pastCandles, fullCandles]);
+
+  const priceDiff = useMemo(() => {
+    const lastPast = pastCandles[pastCandles.length - 1];
+    const future = fullCandles[fullCandles.length - 1];
+    return future.close - lastPast.close;
+  }, [pastCandles, fullCandles]);
+
+  function handleAnswer(choice: 'buy' | 'sell') {
+    setAnswer(choice);
+    setShowResult(true);
+    const lastPast = pastCandles[pastCandles.length - 1];
+    const future = fullCandles[fullCandles.length - 1];
+    const went = future.close >= lastPast.close ? 'buy' : 'sell';
+    progress.recordAnswer('predict', went === choice, 10);
   }
 
-  const showNav = TAB_KEYS.includes(screen);
+  function nextQuestion() {
+    setChartSet(getRandomChartSet(chartSet.id));
+    setAnswer(null);
+    setShowResult(false);
+  }
 
   return (
-    <div className="mx-auto min-h-screen max-w-md bg-[var(--color-bg)]">
-      {content}
-      {showNav && <BottomNav current={screen} onChange={(key) => setScreen(key)} />}
+    <div className="flex min-h-full flex-col bg-[var(--color-bg)] pb-24">
+      <ScreenHeader title="チャート予想モード" onBack={onBack} />
+
+      <div className="px-4 pt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="rounded-full bg-[var(--color-surface-alt)] px-3 py-1 text-xs font-bold text-gray-300">
+            {chartSet.pair}
+          </span>
+          <span className="text-xs text-gray-500">10本後の価格は上か下か？</span>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-[var(--color-border)]">
+          <CandleChart candles={visibleCandles} height={300} />
+        </div>
+
+        {!showResult && (
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button
+              onClick={() => handleAnswer('buy')}
+              className="rounded-2xl bg-[var(--color-up)]/15 border-2 border-[var(--color-up)] py-5 text-lg font-extrabold text-[var(--color-up)] active:scale-[0.97]"
+            >
+              ▲ BUY（上がる）
+            </button>
+            <button
+              onClick={() => handleAnswer('sell')}
+              className="rounded-2xl bg-[var(--color-down)]/15 border-2 border-[var(--color-down)] py-5 text-lg font-extrabold text-[var(--color-down)] active:scale-[0.97]"
+            >
+              ▼ SELL（下がる）
+            </button>
+          </div>
+        )}
+
+        {showResult && (
+          <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-400">あなたの予想</span>
+              <span className={`font-bold ${answer === 'buy' ? 'text-[var(--color-up)]' : 'text-[var(--color-down)]'}`}>
+                {answer === 'buy' ? 'BUY（上がる）' : 'SELL（下がる）'}
+              </span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-sm">
+              <span className="text-gray-400">実際の値動き</span>
+              <span className={`font-bold ${priceDiff >= 0 ? 'text-[var(--color-up)]' : 'text-[var(--color-down)]'}`}>
+                {priceDiff >= 0 ? '+' : ''}
+                {priceDiff.toFixed(chartSet.pair === 'EURUSD' ? 5 : 3)}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <ResultPanel
+        visible={showResult}
+        correct={correct}
+        title={correct ? '予想通りの方向に動きました！' : '予想と逆方向に動きました'}
+        description={
+          correct
+            ? '相場の流れを正しく読めています。続けて感覚を磨きましょう。'
+            : '結果は確率の一部です。チャート全体の流れ・直近の勢いを振り返ってみましょう。'
+        }
+        expGain={correct ? 10 : 2}
+        onNext={nextQuestion}
+      />
     </div>
   );
 }
