@@ -1,72 +1,36 @@
-import ScreenHeader from '../components/ScreenHeader';
-import type { GameKey } from './HomeScreen';
-
-interface GamesScreenProps {
-  onBack: () => void;
-  onStartGame: (game: GameKey) => void;
-}
-
-const GAMES: { key: GameKey; label: string; icon: string; desc: string; color: string }[] = [
-  {
-    key: 'predict',
-    label: 'チャート予想モード',
-    icon: '🔮',
-    desc: '過去チャートを見て、10本後に上がるか下がるかを予想します。',
-    color: 'var(--color-accent)',
+{
+  "name": "fx-trainer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
   },
-  {
-    key: 'entry',
-    label: 'エントリーポイント当てゲーム',
-    icon: '🎯',
-    desc: 'チャートをタップしてエントリー位置を選び、利益・含み損・勝率を判定します。',
-    color: 'var(--color-up)',
+  "dependencies": {
+    "lightweight-charts": "^5.2.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "vite-plugin-pwa": "^1.3.0"
   },
-  {
-    key: 'supres',
-    label: 'サポレジ発見ゲーム',
-    icon: '📏',
-    desc: 'サポートライン・レジスタンスラインを引いて、正解との誤差を100点満点で採点します。',
-    color: 'var(--color-gold)',
-  },
-  {
-    key: 'trend',
-    label: 'トレンド判定ゲーム',
-    icon: '📊',
-    desc: 'チャートが上昇・下降・レンジのどれかを当てて正解率を記録します。',
-    color: 'var(--color-accent-alt)',
-  },
-  {
-    key: 'pattern',
-    label: 'ローソク足パターン問題',
-    icon: '🕯️',
-    desc: 'ピンバー・包み足・十字線・はらみ足などのパターンを解説付きで学びます。',
-    color: 'var(--color-down)',
-  },
-];
-
-export default function GamesScreen({ onBack, onStartGame }: GamesScreenProps) {
-  return (
-    <div className="min-h-full bg-[var(--color-bg)] pb-24">
-      <ScreenHeader title="ゲームを選ぶ" onBack={onBack} />
-      <div className="px-4 pt-4">
-        <div className="space-y-3">
-          {GAMES.map((g) => (
-            <button
-              key={g.key}
-              onClick={() => onStartGame(g.key)}
-              className="flex w-full items-center gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-left active:scale-[0.98]"
-              style={{ borderLeftWidth: 4, borderLeftColor: g.color }}
-            >
-              <div className="text-3xl">{g.icon}</div>
-              <div className="flex-1">
-                <div className="text-base font-bold text-gray-100">{g.label}</div>
-                <div className="mt-0.5 text-xs leading-relaxed text-gray-500">{g.desc}</div>
-              </div>
-              <div className="text-gray-500">›</div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/postcss": "^4.3.1",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.5.0",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.1",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^8.0.12"
+  }
 }
