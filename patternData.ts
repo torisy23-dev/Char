@@ -1,182 +1,126 @@
-import { useEffect, useRef } from 'react';
-import {
-  createChart,
-  createSeriesMarkers,
-  CandlestickSeries,
-  LineSeries,
-  ColorType,
-  type IChartApi,
-  type ISeriesApi,
-  type ISeriesMarkersPluginApi,
-  type Time,
-} from 'lightweight-charts';
-import type { Candle } from '../types';
+import type { Candle, CandlePatternKey, CandlePatternQuestion } from '../types';
 
-export interface MarkerLine {
-  price: number;
-  color: string;
-  title?: string;
+export const PATTERN_INFO: Record<CandlePatternKey, { label: string; description: string }> = {
+  pinbar_bull: {
+    label: 'ピンバー（買いサイン）',
+    description:
+      '下に長いヒゲを持つローソク足。一度大きく売られたあと買い戻されたことを示し、下落からの反転（上昇）のサインとされます。',
+  },
+  pinbar_bear: {
+    label: 'ピンバー（売りサイン）',
+    description:
+      '上に長いヒゲを持つローソク足。一度大きく買われたあと売られたことを示し、上昇からの反転（下落）のサインとされます。',
+  },
+  engulfing_bull: {
+    label: '包み足（買い）',
+    description:
+      '前のローソク足を完全に包み込む大きな上昇の実体。売りの勢いを買いが圧倒したことを示し、上昇への転換サインとされます。',
+  },
+  engulfing_bear: {
+    label: '包み足（売り）',
+    description:
+      '前のローソク足を完全に包み込む大きな下降の実体。買いの勢いを売りが圧倒したことを示し、下落への転換サインとされます。',
+  },
+  doji: {
+    label: '十字線（ドジ）',
+    description:
+      '始値と終値がほぼ同じローソク足。買いと売りの力が均衡している状態を示し、トレンドの転換や迷いを表すことが多いです。',
+  },
+  harami_bull: {
+    label: 'はらみ足（買い）',
+    description:
+      '大きな下降の実体の中に、小さな上昇の実体が収まる形。下落の勢いが弱まり反転の可能性を示します。',
+  },
+  harami_bear: {
+    label: 'はらみ足（売り）',
+    description:
+      '大きな上昇の実体の中に、小さな下降の実体が収まる形。上昇の勢いが弱まり反転の可能性を示します。',
+  },
+};
+
+const PATTERN_OPTIONS: CandlePatternKey[] = [
+  'pinbar_bull',
+  'pinbar_bear',
+  'engulfing_bull',
+  'engulfing_bear',
+  'doji',
+  'harami_bull',
+  'harami_bear',
+];
+
+const BASE = 150.0;
+const PIP = 0.01;
+
+function c(time: number, open: number, high: number, low: number, close: number): Candle {
+  return { time, open, high, low, close };
 }
 
-interface CandleChartProps {
-  candles: Candle[];
-  height?: number;
-  /** タップ時の座標(価格)を受け取るコールバック。指定すると操作可能になる */
-  onPriceClick?: (price: number, time: number) => void;
-  /** 描画する水平線 */
-  horizontalLines?: MarkerLine[];
-  /** エントリーポイントなどのマーカー */
-  markerTime?: number;
-  markerColor?: string;
+// 各パターンを明示的に作る（最後のローソク足が問題対象）
+function buildPattern(key: CandlePatternKey, seedOffset: number): Candle[] {
+  const t0 = 1700000000 + seedOffset * 3600;
+  const prev: Candle = c(t0, BASE, BASE + 10 * PIP, BASE - 5 * PIP, BASE + 6 * PIP);
+
+  switch (key) {
+    case 'pinbar_bull': {
+      const target = c(t0 + 3600, BASE + 4 * PIP, BASE + 6 * PIP, BASE - 25 * PIP, BASE + 5 * PIP);
+      return [prev, target];
+    }
+    case 'pinbar_bear': {
+      const target = c(t0 + 3600, BASE + 6 * PIP, BASE + 26 * PIP, BASE + 4 * PIP, BASE + 5 * PIP);
+      return [prev, target];
+    }
+    case 'engulfing_bull': {
+      const p2 = c(t0, BASE + 8 * PIP, BASE + 9 * PIP, BASE - 2 * PIP, BASE);
+      const target = c(t0 + 3600, BASE - 1 * PIP, BASE + 13 * PIP, BASE - 2 * PIP, BASE + 11 * PIP);
+      return [p2, target];
+    }
+    case 'engulfing_bear': {
+      const p2 = c(t0, BASE - 8 * PIP, BASE + 2 * PIP, BASE - 9 * PIP, BASE);
+      const target = c(t0 + 3600, BASE + 1 * PIP, BASE + 2 * PIP, BASE - 12 * PIP, BASE - 11 * PIP);
+      return [p2, target];
+    }
+    case 'doji': {
+      const target = c(t0 + 3600, BASE + 5 * PIP, BASE + 15 * PIP, BASE - 10 * PIP, BASE + 5.3 * PIP);
+      return [prev, target];
+    }
+    case 'harami_bull': {
+      const p2 = c(t0, BASE + 10 * PIP, BASE + 11 * PIP, BASE - 10 * PIP, BASE - 8 * PIP);
+      const target = c(t0 + 3600, BASE - 6 * PIP, BASE + 1 * PIP, BASE - 7 * PIP, BASE - 1 * PIP);
+      return [p2, target];
+    }
+    case 'harami_bear': {
+      const p2 = c(t0, BASE - 10 * PIP, BASE + 10 * PIP, BASE - 11 * PIP, BASE + 8 * PIP);
+      const target = c(t0 + 3600, BASE + 6 * PIP, BASE + 7 * PIP, BASE - 1 * PIP, BASE + 1 * PIP);
+      return [p2, target];
+    }
+  }
 }
 
-export default function CandleChart({
-  candles,
-  height = 280,
-  onPriceClick,
-  horizontalLines = [],
-  markerTime,
-  markerColor = '#22d3ee',
-}: CandleChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const lineSeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
-  const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+export function generatePatternQuestion(index: number): CandlePatternQuestion {
+  const key = PATTERN_OPTIONS[index % PATTERN_OPTIONS.length];
+  return {
+    id: `pattern-${index}`,
+    candles: buildPattern(key, index),
+    answer: key,
+  };
+}
 
-  // 初期化
-  useEffect(() => {
-    if (!containerRef.current) return;
+export function getPatternChoices(answer: CandlePatternKey, count = 4): CandlePatternKey[] {
+  const choices = new Set<CandlePatternKey>([answer]);
+  const pool = [...PATTERN_OPTIONS];
+  while (choices.size < count && pool.length > 0) {
+    const idx = Math.floor(Math.random() * pool.length);
+    choices.add(pool[idx]);
+    pool.splice(idx, 1);
+  }
+  return shuffle([...choices]);
+}
 
-    const chart = createChart(containerRef.current, {
-      height,
-      layout: {
-        background: { type: ColorType.Solid, color: '#0b0f14' },
-        textColor: '#9ca3af',
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: '#1f2937' },
-        horzLines: { color: '#1f2937' },
-      },
-      timeScale: {
-        timeVisible: false,
-        secondsVisible: false,
-        borderColor: '#1f2937',
-      },
-      rightPriceScale: {
-        borderColor: '#1f2937',
-      },
-      crosshair: {
-        mode: 0,
-      },
-      handleScroll: !onPriceClick,
-      handleScale: !onPriceClick,
-    });
-
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: '#22c55e',
-      downColor: '#ef4444',
-      borderUpColor: '#22c55e',
-      borderDownColor: '#ef4444',
-      wickUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
-    });
-
-    chartRef.current = chart;
-    seriesRef.current = series;
-
-    if (onPriceClick) {
-      chart.subscribeClick((param) => {
-        if (!param.point || param.time === undefined) return;
-        const price = series.coordinateToPrice(param.point.y);
-        if (price !== null) {
-          onPriceClick(price, Number(param.time));
-        }
-      });
-    }
-
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      chart.remove();
-      chartRef.current = null;
-      seriesRef.current = null;
-      lineSeriesRef.current = [];
-      markersPluginRef.current = null;
-    };
-     
-  }, [height, onPriceClick]);
-
-  // データ更新
-  useEffect(() => {
-    if (!seriesRef.current) return;
-    const data = candles.map((c) => ({
-      time: c.time as Time,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
-    seriesRef.current.setData(data);
-    chartRef.current?.timeScale().fitContent();
-  }, [candles]);
-
-  // 水平線（サポート/レジスタンス等）の描画
-  useEffect(() => {
-    if (!chartRef.current) return;
-
-    // 既存ラインを削除
-    lineSeriesRef.current.forEach((s) => chartRef.current?.removeSeries(s));
-    lineSeriesRef.current = [];
-
-    if (candles.length === 0) return;
-
-    horizontalLines.forEach((line) => {
-      const lineSeries = chartRef.current!.addSeries(LineSeries, {
-        color: line.color,
-        lineWidth: 2,
-        lineStyle: 2, // dashed
-        title: line.title,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-      });
-      lineSeries.setData([
-        { time: candles[0].time as Time, value: line.price },
-        { time: candles[candles.length - 1].time as Time, value: line.price },
-      ]);
-      lineSeriesRef.current.push(lineSeries);
-    });
-  }, [horizontalLines, candles]);
-
-  // エントリーマーカー
-  useEffect(() => {
-    if (!seriesRef.current) return;
-    if (!markersPluginRef.current) {
-      markersPluginRef.current = createSeriesMarkers(seriesRef.current, []);
-    }
-    if (markerTime === undefined) {
-      markersPluginRef.current.setMarkers([]);
-      return;
-    }
-    markersPluginRef.current.setMarkers([
-      {
-        time: markerTime as Time,
-        position: 'belowBar',
-        color: markerColor,
-        shape: 'arrowUp',
-        text: 'ENTRY',
-      },
-    ]);
-  }, [markerTime, markerColor]);
-
-  return <div ref={containerRef} className="w-full touch-none" />;
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }

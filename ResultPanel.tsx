@@ -1,47 +1,54 @@
-import { expForLevel, getLevelTitle } from '../types';
-import type { UserStats } from '../types';
-
-interface LevelBadgeProps {
-  stats: UserStats;
-  compact?: boolean;
+interface ResultPanelProps {
+  visible: boolean;
+  correct: boolean;
+  title: string;
+  description?: string;
+  expGain?: number;
+  onNext: () => void;
+  nextLabel?: string;
 }
 
-export default function LevelBadge({ stats, compact = false }: LevelBadgeProps) {
-  const needed = expForLevel(stats.level);
-  const pct = Math.min(100, Math.round((stats.exp / needed) * 100));
-  const title = getLevelTitle(stats.level);
-
-  if (compact) {
-    return (
-      <div className="flex items-center gap-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-accent)]/15 text-sm font-bold text-[var(--color-accent)]">
-          {stats.level}
-        </div>
-        <div className="text-xs text-gray-400">{title}</div>
-      </div>
-    );
-  }
+export default function ResultPanel({
+  visible,
+  correct,
+  title,
+  description,
+  expGain,
+  onNext,
+  nextLabel = '次の問題へ',
+}: ResultPanelProps) {
+  if (!visible) return null;
 
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent)]/15 text-lg font-bold text-[var(--color-accent)]">
-            Lv{stats.level}
-          </div>
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-t-3xl border-t border-[var(--color-border)] bg-[var(--color-surface)] p-5 pb-8 safe-bottom">
+        <div className="mb-3 flex items-center gap-2">
+          <span
+            className={`flex h-10 w-10 items-center justify-center rounded-full text-xl font-bold ${
+              correct ? 'bg-[var(--color-up)]/15 text-[var(--color-up)]' : 'bg-[var(--color-down)]/15 text-[var(--color-down)]'
+            }`}
+          >
+            {correct ? '◎' : '×'}
+          </span>
           <div>
-            <div className="text-sm font-bold text-gray-100">{title}</div>
-            <div className="text-xs text-gray-500">
-              EXP {stats.exp} / {needed}
+            <div className={`text-lg font-bold ${correct ? 'text-[var(--color-up)]' : 'text-[var(--color-down)]'}`}>
+              {correct ? '正解！' : '不正解'}
             </div>
+            <div className="text-sm font-medium text-gray-200">{title}</div>
           </div>
+          {expGain !== undefined && (
+            <div className="ml-auto rounded-full bg-[var(--color-accent)]/15 px-3 py-1 text-xs font-bold text-[var(--color-accent)]">
+              +{expGain} EXP
+            </div>
+          )}
         </div>
-      </div>
-      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-alt)]">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-alt)] transition-all"
-          style={{ width: `${pct}%` }}
-        />
+        {description && <p className="mb-4 text-sm leading-relaxed text-gray-400">{description}</p>}
+        <button
+          onClick={onNext}
+          className="w-full rounded-xl bg-[var(--color-accent)] py-3.5 text-base font-bold text-black active:scale-[0.98]"
+        >
+          {nextLabel}
+        </button>
       </div>
     </div>
   );

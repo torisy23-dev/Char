@@ -1,43 +1,48 @@
-import type { ScreenKey } from '../App';
+import { expForLevel, getLevelTitle } from '../types';
+import type { UserStats } from '../types';
 
-interface NavItem {
-  key: ScreenKey;
-  label: string;
-  icon: string;
+interface LevelBadgeProps {
+  stats: UserStats;
+  compact?: boolean;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { key: 'home', label: 'ホーム', icon: '🏠' },
-  { key: 'games', label: 'ゲーム', icon: '🎮' },
-  { key: 'replay', label: 'リプレイ', icon: '⏯️' },
-  { key: 'stats', label: '記録', icon: '📊' },
-];
+export default function LevelBadge({ stats, compact = false }: LevelBadgeProps) {
+  const needed = expForLevel(stats.level);
+  const pct = Math.min(100, Math.round((stats.exp / needed) * 100));
+  const title = getLevelTitle(stats.level);
 
-interface BottomNavProps {
-  current: ScreenKey;
-  onChange: (key: ScreenKey) => void;
-}
-
-export default function BottomNav({ current, onChange }: BottomNavProps) {
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--color-border)] bg-[var(--color-surface)]/95 backdrop-blur safe-bottom">
-      <div className="mx-auto flex max-w-md">
-        {NAV_ITEMS.map((item) => {
-          const active = current === item.key;
-          return (
-            <button
-              key={item.key}
-              onClick={() => onChange(item.key)}
-              className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] transition-colors ${
-                active ? 'text-[var(--color-accent)]' : 'text-gray-500'
-              }`}
-            >
-              <span className="text-xl leading-none">{item.icon}</span>
-              <span className="text-[11px] font-medium leading-none">{item.label}</span>
-            </button>
-          );
-        })}
+  if (compact) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-accent)]/15 text-sm font-bold text-[var(--color-accent)]">
+          {stats.level}
+        </div>
+        <div className="text-xs text-gray-400">{title}</div>
       </div>
-    </nav>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent)]/15 text-lg font-bold text-[var(--color-accent)]">
+            Lv{stats.level}
+          </div>
+          <div>
+            <div className="text-sm font-bold text-gray-100">{title}</div>
+            <div className="text-xs text-gray-500">
+              EXP {stats.exp} / {needed}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-alt)]">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-alt)] transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
   );
 }

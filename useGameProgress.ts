@@ -1,75 +1,144 @@
-import { useMemo, useState } from 'react';
-import CandleChart from '../components/CandleChart';
-import ResultPanel from '../components/ResultPanel';
-import ScreenHeader from '../components/ScreenHeader';
-import { generatePatternQuestion, getPatternChoices, PATTERN_INFO } from '../data/patternData';
-import type { useGameProgress } from '../hooks/useGameProgress';
-import type { CandlePatternKey } from '../types';
+import { useCallback, useEffect, useState } from 'react';
+import type { GameModeStats, SaveData } from '../types';
+import { expForLevel } from '../types';
+import { loadSaveData, saveSaveData, resetSaveData } from '../utils/storage';
 
-interface PatternQuizProps {
-  progress: ReturnType<typeof useGameProgress>;
-  onBack: () => void;
+export interface AnswerResult {
+  correct: boolean;
+  expGain: number;
 }
 
-export default function PatternQuiz({ progress, onBack }: PatternQuizProps) {
-  const [index, setIndex] = useState(() => Math.floor(Math.random() * 1000));
-  const [answer, setAnswer] = useState<CandlePatternKey | null>(null);
-  const [showResult, setShowResult] = useState(false);
+export function useGameProgress() {
+  const [data, setData] = useState<SaveData>(() => loadSaveData());
 
-  const question = useMemo(() => generatePatternQuestion(index), [index]);
-  const choices = useMemo(() => getPatternChoices(question.answer), [question]);
+  useEffect(() => {
+    saveSaveData(data);
+  }, [data]);
 
-  function handleAnswer(choice: CandlePatternKey) {
-    setAnswer(choice);
-    setShowResult(true);
-    progress.recordAnswer('pattern', choice === question.answer, 8);
-  }
+  // 正解/不正解の記録 + EXP付与 + レベルアップ判定
+  const recordAnswer = useCallback(
+    (mode: keyof GameModeStats, correct: boolean, baseExp: number): AnswerResult => {
+      setData((prev) => {
+        const next = structuredClone(prev);
+        next.stats.totalQuestions += 1;
+        if (correct) {
+          next.stats.totalCorrect += 1;
+          next.stats.currentStreak += 1;
+          next.stats.bestStreak = Math.max(next.stats.bestStreak, next.stats.currentStreak);
+        } else {
+          next.stats.currentStreak = 0;
+        }
 
-  function nextQuestion() {
-    setIndex((prev) => prev + 1 + Math.floor(Math.random() * 5));
-    setAnswer(null);
-    setShowResult(false);
-  }
+        const expGain = correct ? baseExp : Math.floor(baseExp * 0.25);
+        next.stats.exp += expGain;
 
-  const correct = answer === question.answer;
-  const info = PATTERN_INFO[question.answer];
+        // レベルアップ処理（複数回上がる可能性に対応）
+        let needed = expForLevel(next.stats.level);
+        while (next.stats.exp >= needed) {
+          next.stats.exp -= needed;
+          next.stats.level += 1;
+          needed = expForLevel(next.stats.level);
+        }
 
-  return (
-    <div className="flex min-h-full flex-col bg-[var(--color-bg)] pb-24">
-      <ScreenHeader title="ローソク足パターン問題" onBack={onBack} />
+        // モード別統計
+        switch (mode) {
+          case 'predict':
+            next.modeStats.predict.total += 1;
+            if (correct) next.modeStats.predict.correct += 1;
+            break;
+          case 'trend':
+            next.modeStats.trend.total += 1;
+            if (correct) next.modeStats.trend.correct += 1;
+            break;
+          case 'pattern':
+            next.modeStats.pattern.total += 1;
+            if (correct) next.modeStats.pattern.correct += 1;
+            break;
+          default:
+            break;
+        }
 
-      <div className="px-4 pt-4">
-        <div className="mb-2 text-center text-sm font-medium text-gray-300">
-          この最後のローソク足は何のパターン？
-        </div>
+        return next;
+      });
 
-        <div className="overflow-hidden rounded-2xl border border-[var(--color-border)]">
-          <CandleChart candles={question.candles} height={260} />
-        </div>
-
-        {!showResult && (
-          <div className="mt-4 grid grid-cols-1 gap-3">
-            {choices.map((choice) => (
-              <button
-                key={choice}
-                onClick={() => handleAnswer(choice)}
-                className="w-full rounded-2xl border-2 border-[var(--color-border)] bg-[var(--color-surface)] py-4 px-4 text-left text-base font-bold text-gray-200 active:scale-[0.98] active:border-[var(--color-accent)]"
-              >
-                {PATTERN_INFO[choice].label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <ResultPanel
-        visible={showResult}
-        correct={correct}
-        title={`正解は「${info.label}」`}
-        description={info.description}
-        expGain={correct ? 8 : 2}
-        onNext={nextQuestion}
-      />
-    </div>
+      const expGain = correct ? baseExp : Math.floor(baseExp * 0.25);
+      return { correct, expGain };
+    },
+    []
   );
+
+  const recordEntryResult = useCallback((profitPips: number, win: boolean) => {
+    setData((prev) => {
+      const next = structuredClone(prev);
+      next.modeStats.entry.total += 1;
+      if (win) next.modeStats.entry.winCount += 1;
+      next.modeStats.entry.bestProfit = Math.max(next.modeStats.entry.bestProfit, profitPips);
+
+      // スコアシステムとも連動
+      next.stats.totalQuestions += 1;
+      if (win) {
+        next.stats.totalCorrect += 1;
+        next.stats.currentStreak += 1;
+        next.stats.bestStreak = Math.max(next.stats.bestStreak, next.stats.currentStreak);
+      } else {
+        next.stats.currentStreak = 0;
+      }
+      const expGain = win ? 12 : 3;
+      next.stats.exp += expGain;
+      let needed = expForLevel(next.stats.level);
+      while (next.stats.exp >= needed) {
+        next.stats.exp -= needed;
+        next.stats.level += 1;
+        needed = expForLevel(next.stats.level);
+      }
+      return next;
+    });
+  }, []);
+
+  const recordSupResScore = useCallback((score: number) => {
+    setData((prev) => {
+      const next = structuredClone(prev);
+      next.modeStats.supres.total += 1;
+      next.modeStats.supres.totalScore += score;
+
+      next.stats.totalQuestions += 1;
+      const win = score >= 60;
+      if (win) {
+        next.stats.totalCorrect += 1;
+        next.stats.currentStreak += 1;
+        next.stats.bestStreak = Math.max(next.stats.bestStreak, next.stats.currentStreak);
+      } else {
+        next.stats.currentStreak = 0;
+      }
+      const expGain = Math.max(2, Math.round(score / 10));
+      next.stats.exp += expGain;
+      let needed = expForLevel(next.stats.level);
+      while (next.stats.exp >= needed) {
+        next.stats.exp -= needed;
+        next.stats.level += 1;
+        needed = expForLevel(next.stats.level);
+      }
+      return next;
+    });
+  }, []);
+
+  const updateSettings = useCallback((patch: Partial<SaveData['settings']>) => {
+    setData((prev) => ({
+      ...prev,
+      settings: { ...prev.settings, ...patch },
+    }));
+  }, []);
+
+  const reset = useCallback(() => {
+    setData(resetSaveData());
+  }, []);
+
+  return {
+    data,
+    recordAnswer,
+    recordEntryResult,
+    recordSupResScore,
+    updateSettings,
+    reset,
+  };
 }

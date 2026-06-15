@@ -1,165 +1,124 @@
-import type { Candle, ChartSet, Pair } from '../types';
+import { useMemo, useState } from 'react';
+import CandleChart from '../components/CandleChart';
+import ResultPanel from '../components/ResultPanel';
+import ScreenHeader from '../components/ScreenHeader';
+import { getRandomChartSet } from '../data/chartData';
+import type { useGameProgress } from '../hooks/useGameProgress';
 
-// シード付き擬似乱数（再現性のため）
-function mulberry32(seed: number) {
-  return function () {
-    seed |= 0;
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+const PAST_LENGTH = 100;
+const FUTURE_LENGTH = 10;
+
+interface PredictModeProps {
+  progress: ReturnType<typeof useGameProgress>;
+  onBack: () => void;
 }
 
-interface PairConfig {
-  basePrice: number;
-  pip: number; // 1pipの価格単位
-  volatility: number; // 1本あたりの標準的な値動き(pips換算前の価格単位)
-  decimals: number;
-}
+export default function PredictMode({ progress, onBack }: PredictModeProps) {
+  const [chartSet, setChartSet] = useState(() => getRandomChartSet());
+  const [answer, setAnswer] = useState<'buy' | 'sell' | null>(null);
+  const [showResult, setShowResult] = useState(false);
 
-const PAIR_CONFIG: Record<Pair, PairConfig> = {
-  USDJPY: { basePrice: 150.0, pip: 0.01, volatility: 0.045, decimals: 3 },
-  EURUSD: { basePrice: 1.085, pip: 0.0001, volatility: 0.00045, decimals: 5 },
-  GBPJPY: { basePrice: 190.0, pip: 0.01, volatility: 0.07, decimals: 3 },
-};
+  const pastCandles = useMemo(() => chartSet.candles.slice(0, PAST_LENGTH), [chartSet]);
+  const fullCandles = useMemo(
+    () => chartSet.candles.slice(0, PAST_LENGTH + FUTURE_LENGTH),
+    [chartSet]
+  );
 
-// トレンドフェーズを生成: 各フェーズはトレンド方向・強さ・長さを持つ
-interface Phase {
-  length: number;
-  drift: number; // 1本あたりの平均変化
-  volMultiplier: number; // ボラティリティ倍率（クラスタリング表現）
-}
+  const visibleCandles = showResult ? fullCandles : pastCandles;
 
-function generatePhases(rand: () => number, totalCandles: number): Phase[] {
-  const phases: Phase[] = [];
-  let remaining = totalCandles;
-  while (remaining > 0) {
-    const length = Math.min(remaining, 15 + Math.floor(rand() * 40)); // 15-55本
-    const phaseType = rand();
-    let drift: number;
-    let volMultiplier: number;
+  const correct = useMemo(() => {
+    if (!answer) return false;
+    const lastPast = pastCandles[pastCandles.length - 1];
+    const future = fullCandles[fullCandles.length - 1];
+    const went = future.close >= lastPast.close ? 'buy' : 'sell';
+    return went === answer;
+  }, [answer, pastCandles, fullCandles]);
 
-    if (phaseType < 0.35) {
-      // 上昇トレンド
-      drift = 0.15 + rand() * 0.45;
-      volMultiplier = 0.8 + rand() * 0.6;
-    } else if (phaseType < 0.7) {
-      // 下降トレンド
-      drift = -(0.15 + rand() * 0.45);
-      volMultiplier = 0.8 + rand() * 0.6;
-    } else {
-      // レンジ（弱いドリフト・低ボラ）
-      drift = (rand() - 0.5) * 0.08;
-      volMultiplier = 0.4 + rand() * 0.5;
-    }
+  const priceDiff = useMemo(() => {
+    const lastPast = pastCandles[pastCandles.length - 1];
+    const future = fullCandles[fullCandles.length - 1];
+    return future.close - lastPast.close;
+  }, [pastCandles, fullCandles]);
 
-    // ときどき急変動フェーズ（ニュースイベント風）
-    if (rand() < 0.08) {
-      volMultiplier *= 2.2;
-    }
-
-    phases.push({ length, drift, volMultiplier });
-    remaining -= length;
-  }
-  return phases;
-}
-
-// 1セット分のローソク足を生成（過去100本+未来30本 = 130本）
-export function generateCandleSet(seed: number, pair: Pair, totalCandles = 130): Candle[] {
-  const rand = mulberry32(seed);
-  const cfg = PAIR_CONFIG[pair];
-  const candles: Candle[] = [];
-
-  const phases = generatePhases(rand, totalCandles);
-
-  let price = cfg.basePrice * (1 + (rand() - 0.5) * 0.02); // 開始価格に少しランダム性
-  const startTime = Math.floor(Date.now() / 1000) - totalCandles * 3600; // 1時間足想定
-  let momentum = 0; // 直近の値動きの慣性（連続性を出す）
-
-  let phaseIdx = 0;
-  let phaseRemaining = phases[0]?.length ?? totalCandles;
-
-  for (let i = 0; i < totalCandles; i++) {
-    if (phaseRemaining <= 0 && phaseIdx < phases.length - 1) {
-      phaseIdx++;
-      phaseRemaining = phases[phaseIdx].length;
-    }
-    phaseRemaining--;
-    const phase = phases[phaseIdx];
-
-    const baseVol = cfg.volatility * phase.volMultiplier;
-
-    // ノイズ + ドリフト + 慣性
-    const noise = (rand() - 0.5) * 2 * baseVol;
-    momentum = momentum * 0.3 + noise * 0.7;
-    const change = phase.drift * cfg.pip * 10 + momentum;
-
-    const open = price;
-    const close = open + change;
-
-    // ヒゲの生成: ボディに対してランダムな比率で上下に伸びる
-    const bodyRange = Math.abs(close - open);
-    const wickBase = baseVol * (0.3 + rand() * 0.9);
-    const upperWick = wickBase * rand();
-    const lowerWick = wickBase * rand();
-
-    const high = Math.max(open, close) + upperWick + bodyRange * 0.05;
-    const low = Math.min(open, close) - lowerWick - bodyRange * 0.05;
-
-    candles.push({
-      time: startTime + i * 3600,
-      open: round(open, cfg.decimals),
-      high: round(high, cfg.decimals),
-      low: round(low, cfg.decimals),
-      close: round(close, cfg.decimals),
-    });
-
-    price = close;
-
-    // 価格が極端にずれないよう緩やかに基準値へ引き戻す
-    const meanReversion = (cfg.basePrice - price) * 0.0015;
-    price += meanReversion;
+  function handleAnswer(choice: 'buy' | 'sell') {
+    setAnswer(choice);
+    setShowResult(true);
+    const lastPast = pastCandles[pastCandles.length - 1];
+    const future = fullCandles[fullCandles.length - 1];
+    const went = future.close >= lastPast.close ? 'buy' : 'sell';
+    progress.recordAnswer('predict', went === choice, 10);
   }
 
-  return candles;
-}
-
-function round(value: number, decimals: number): number {
-  const factor = Math.pow(10, decimals);
-  return Math.round(value * factor) / factor;
-}
-
-// 100セット生成 (USDJPY / EURUSD / GBPJPY を均等に)
-export function generateAllChartSets(): ChartSet[] {
-  const pairs: Pair[] = ['USDJPY', 'EURUSD', 'GBPJPY'];
-  const sets: ChartSet[] = [];
-  for (let i = 0; i < 100; i++) {
-    const pair = pairs[i % pairs.length];
-    const seed = 1000 + i * 37;
-    sets.push({
-      id: `set-${i}`,
-      pair,
-      candles: generateCandleSet(seed, pair),
-    });
+  function nextQuestion() {
+    setChartSet(getRandomChartSet(chartSet.id));
+    setAnswer(null);
+    setShowResult(false);
   }
-  return sets;
-}
 
-// メモ化されたデータセット（アプリ起動時に1度だけ生成）
-let cachedSets: ChartSet[] | null = null;
-export function getChartSets(): ChartSet[] {
-  if (!cachedSets) {
-    cachedSets = generateAllChartSets();
-  }
-  return cachedSets;
-}
+  return (
+    <div className="flex min-h-full flex-col bg-[var(--color-bg)] pb-24">
+      <ScreenHeader title="チャート予想モード" onBack={onBack} />
 
-export function getRandomChartSet(excludeId?: string): ChartSet {
-  const sets = getChartSets();
-  let candidate: ChartSet;
-  do {
-    candidate = sets[Math.floor(Math.random() * sets.length)];
-  } while (sets.length > 1 && candidate.id === excludeId);
-  return candidate;
+      <div className="px-4 pt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="rounded-full bg-[var(--color-surface-alt)] px-3 py-1 text-xs font-bold text-gray-300">
+            {chartSet.pair}
+          </span>
+          <span className="text-xs text-gray-500">10本後の価格は上か下か？</span>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-[var(--color-border)]">
+          <CandleChart candles={visibleCandles} height={300} />
+        </div>
+
+        {!showResult && (
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button
+              onClick={() => handleAnswer('buy')}
+              className="rounded-2xl bg-[var(--color-up)]/15 border-2 border-[var(--color-up)] py-5 text-lg font-extrabold text-[var(--color-up)] active:scale-[0.97]"
+            >
+              ▲ BUY（上がる）
+            </button>
+            <button
+              onClick={() => handleAnswer('sell')}
+              className="rounded-2xl bg-[var(--color-down)]/15 border-2 border-[var(--color-down)] py-5 text-lg font-extrabold text-[var(--color-down)] active:scale-[0.97]"
+            >
+              ▼ SELL（下がる）
+            </button>
+          </div>
+        )}
+
+        {showResult && (
+          <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-400">あなたの予想</span>
+              <span className={`font-bold ${answer === 'buy' ? 'text-[var(--color-up)]' : 'text-[var(--color-down)]'}`}>
+                {answer === 'buy' ? 'BUY（上がる）' : 'SELL（下がる）'}
+              </span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-sm">
+              <span className="text-gray-400">実際の値動き</span>
+              <span className={`font-bold ${priceDiff >= 0 ? 'text-[var(--color-up)]' : 'text-[var(--color-down)]'}`}>
+                {priceDiff >= 0 ? '+' : ''}
+                {priceDiff.toFixed(chartSet.pair === 'EURUSD' ? 5 : 3)}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <ResultPanel
+        visible={showResult}
+        correct={correct}
+        title={correct ? '予想通りの方向に動きました！' : '予想と逆方向に動きました'}
+        description={
+          correct
+            ? '相場の流れを正しく読めています。続けて感覚を磨きましょう。'
+            : '結果は確率の一部です。チャート全体の流れ・直近の勢いを振り返ってみましょう。'
+        }
+        expGain={correct ? 10 : 2}
+        onNext={nextQuestion}
+      />
+    </div>
+  );
 }

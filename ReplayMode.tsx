@@ -1,101 +1,67 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CandleChart from '../components/CandleChart';
 import ScreenHeader from '../components/ScreenHeader';
 import { getRandomChartSet } from '../data/chartData';
-import type { useGameProgress } from '../hooks/useGameProgress';
-import type { Pair } from '../types';
 
-const PAST_LENGTH = 100;
-const FUTURE_LENGTH = 30;
+const TOTAL_LENGTH = 130;
+const INITIAL_VISIBLE = 30;
 
-interface EntryGameProps {
-  progress: ReturnType<typeof useGameProgress>;
+interface ReplayModeProps {
   onBack: () => void;
 }
 
-function pipDivisor(pair: Pair): number {
-  return pair === 'EURUSD' ? 0.0001 : 0.01;
-}
-
-export default function EntryGame({ progress, onBack }: EntryGameProps) {
+export default function ReplayMode({ onBack }: ReplayModeProps) {
   const [chartSet, setChartSet] = useState(() => getRandomChartSet());
-  const [entryTime, setEntryTime] = useState<number | null>(null);
-  const [entryPrice, setEntryPrice] = useState<number | null>(null);
-  const [direction, setDirection] = useState<'buy' | 'sell'>('buy');
-  const [showResult, setShowResult] = useState(false);
-  const [recorded, setRecorded] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<1 | 2>(1);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const pastCandles = useMemo(() => chartSet.candles.slice(0, PAST_LENGTH), [chartSet]);
-  const fullCandles = useMemo(
-    () => chartSet.candles.slice(0, PAST_LENGTH + FUTURE_LENGTH),
-    [chartSet]
-  );
+  const allCandles = chartSet.candles.slice(0, TOTAL_LENGTH);
+  const visibleCandles = allCandles.slice(0, visibleCount);
 
-  const visibleCandles = showResult ? fullCandles : pastCandles;
+  useEffect(() => {
+    if (playing) {
+      const interval = speed === 1 ? 700 : 250;
+      intervalRef.current = setInterval(() => {
+        setVisibleCount((prev) => {
+          if (prev >= allCandles.length) {
+            setPlaying(false);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, interval);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [playing, speed, allCandles.length]);
 
-  function handlePriceClick(price: number, time: number) {
-    if (showResult) return;
-    const nearest = pastCandles.reduce((prev, cur) =>
-      Math.abs(cur.time - time) < Math.abs(prev.time - time) ? cur : prev
-    );
-    setEntryTime(nearest.time);
-    setEntryPrice(price);
+  function stepForward() {
+    setPlaying(false);
+    setVisibleCount((prev) => Math.min(prev + 1, allCandles.length));
   }
 
-  const evaluation = useMemo(() => {
-    if (entryTime === null || entryPrice === null) return null;
-    const entryIdx = fullCandles.findIndex((c) => c.time === entryTime);
-    if (entryIdx === -1) return null;
-
-    const future = fullCandles.slice(entryIdx + 1);
-    if (future.length === 0) return null;
-
-    const div = pipDivisor(chartSet.pair);
-    let maxProfit = -Infinity;
-    let maxDrawdown = Infinity;
-
-    future.forEach((c) => {
-      const highDiff = direction === 'buy' ? c.high - entryPrice : entryPrice - c.low;
-      const lowDiff = direction === 'buy' ? c.low - entryPrice : entryPrice - c.high;
-      maxProfit = Math.max(maxProfit, highDiff);
-      maxDrawdown = Math.min(maxDrawdown, lowDiff);
-    });
-
-    const finalDiff =
-      direction === 'buy'
-        ? future[future.length - 1].close - entryPrice
-        : entryPrice - future[future.length - 1].close;
-
-    const maxProfitPips = maxProfit / div;
-    const maxDrawdownPips = maxDrawdown / div;
-    const finalPips = finalDiff / div;
-    const win = finalPips > 0;
-
-    return { maxProfitPips, maxDrawdownPips, finalPips, win };
-  }, [entryTime, entryPrice, direction, fullCandles, chartSet.pair]);
-
-  function confirmEntry() {
-    if (entryPrice === null) return;
-    setShowResult(true);
+  function reset() {
+    setPlaying(false);
+    setVisibleCount(INITIAL_VISIBLE);
   }
 
-  // 結果表示時に一度だけスコアを記録
-  if (showResult && evaluation && !recorded) {
-    progress.recordEntryResult(evaluation.maxProfitPips, evaluation.win);
-    setRecorded(true);
-  }
-
-  function startNext() {
+  function newChart() {
+    setPlaying(false);
     setChartSet(getRandomChartSet(chartSet.id));
-    setEntryTime(null);
-    setEntryPrice(null);
-    setShowResult(false);
-    setRecorded(false);
+    setVisibleCount(INITIAL_VISIBLE);
   }
+
+  const isFinished = visibleCount >= allCandles.length;
 
   return (
     <div className="flex min-h-full flex-col bg-[var(--color-bg)] pb-24">
-      <ScreenHeader title="エントリーポイント当てゲーム" onBack={onBack} />
+      <ScreenHeader title="リプレイモード" onBack={onBack} />
 
       <div className="px-4 pt-4">
         <div className="mb-2 flex items-center justify-between">
@@ -103,111 +69,69 @@ export default function EntryGame({ progress, onBack }: EntryGameProps) {
             {chartSet.pair}
           </span>
           <span className="text-xs text-gray-500">
-            {showResult ? '結果：30本後までの動き' : 'チャートをタップしてエントリー位置を選択'}
+            {visibleCount} / {allCandles.length} 本
           </span>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-[var(--color-border)]">
-          <CandleChart
-            candles={visibleCandles}
-            height={300}
-            onPriceClick={showResult ? undefined : handlePriceClick}
-            markerTime={entryTime ?? undefined}
-            markerColor={direction === 'buy' ? '#22c55e' : '#ef4444'}
-          />
+          <CandleChart candles={visibleCandles} height={320} />
         </div>
 
-        {!showResult && (
-          <>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setDirection('buy')}
-                className={`rounded-2xl border-2 py-3 text-sm font-extrabold active:scale-[0.97] ${
-                  direction === 'buy'
-                    ? 'border-[var(--color-up)] bg-[var(--color-up)]/15 text-[var(--color-up)]'
-                    : 'border-[var(--color-border)] text-gray-500'
-                }`}
-              >
-                ▲ BUYでエントリー
-              </button>
-              <button
-                onClick={() => setDirection('sell')}
-                className={`rounded-2xl border-2 py-3 text-sm font-extrabold active:scale-[0.97] ${
-                  direction === 'sell'
-                    ? 'border-[var(--color-down)] bg-[var(--color-down)]/15 text-[var(--color-down)]'
-                    : 'border-[var(--color-border)] text-gray-500'
-                }`}
-              >
-                ▼ SELLでエントリー
-              </button>
-            </div>
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <button
+            onClick={reset}
+            className="flex h-12 w-12 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-lg text-gray-300 active:scale-95"
+            aria-label="リセット"
+          >
+            ⏮
+          </button>
+          <button
+            onClick={() => setPlaying((p) => !p)}
+            disabled={isFinished}
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-accent)] text-2xl text-black disabled:opacity-30 active:scale-95"
+            aria-label={playing ? '一時停止' : '再生'}
+          >
+            {playing ? '⏸' : '▶'}
+          </button>
+          <button
+            onClick={stepForward}
+            disabled={isFinished}
+            className="flex h-12 w-12 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-lg text-gray-300 disabled:opacity-30 active:scale-95"
+            aria-label="1本進める"
+          >
+            ⏩
+          </button>
+        </div>
 
-            {entryPrice !== null && (
-              <div className="mt-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm text-gray-300">
-                選択した価格:{' '}
-                <span className="font-bold text-[var(--color-accent)]">
-                  {entryPrice.toFixed(chartSet.pair === 'EURUSD' ? 5 : 3)}
-                </span>
-              </div>
-            )}
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <button
+            onClick={() => setSpeed(1)}
+            className={`rounded-full px-4 py-2 text-xs font-bold ${
+              speed === 1 ? 'bg-[var(--color-accent)] text-black' : 'bg-[var(--color-surface-alt)] text-gray-400'
+            }`}
+          >
+            通常速度
+          </button>
+          <button
+            onClick={() => setSpeed(2)}
+            className={`rounded-full px-4 py-2 text-xs font-bold ${
+              speed === 2 ? 'bg-[var(--color-accent)] text-black' : 'bg-[var(--color-surface-alt)] text-gray-400'
+            }`}
+          >
+            倍速
+          </button>
+        </div>
 
-            <button
-              onClick={confirmEntry}
-              disabled={entryPrice === null}
-              className="mt-4 w-full rounded-xl bg-[var(--color-accent)] py-3.5 text-base font-bold text-black disabled:opacity-30 active:scale-[0.98]"
-            >
-              このポイントでエントリー確定
-            </button>
-          </>
-        )}
+        <div className="mt-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm text-gray-400">
+          1本ずつローソク足を進めながら、次の値動きを予想してみましょう。未来を見ずに「今ならどう判断するか」を考える練習に最適です。
+        </div>
 
-        {showResult && evaluation && (
-          <div className="mt-4 space-y-3">
-            <div
-              className={`rounded-2xl border-2 p-4 text-center ${
-                evaluation.win
-                  ? 'border-[var(--color-up)] bg-[var(--color-up)]/10'
-                  : 'border-[var(--color-down)] bg-[var(--color-down)]/10'
-              }`}
-            >
-              <div className={`text-2xl font-extrabold ${evaluation.win ? 'text-[var(--color-up)]' : 'text-[var(--color-down)]'}`}>
-                {evaluation.win ? '勝ち（プラス）' : '負け（マイナス）'}
-              </div>
-              <div className="mt-1 text-sm text-gray-400">
-                最終損益: {evaluation.finalPips >= 0 ? '+' : ''}
-                {evaluation.finalPips.toFixed(1)} pips
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-center">
-                <div className="text-xs text-gray-500">最高利益</div>
-                <div className="mt-1 text-lg font-extrabold text-[var(--color-up)]">
-                  +{evaluation.maxProfitPips.toFixed(1)} pips
-                </div>
-              </div>
-              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-center">
-                <div className="text-xs text-gray-500">最大含み損</div>
-                <div className="mt-1 text-lg font-extrabold text-[var(--color-down)]">
-                  {evaluation.maxDrawdownPips.toFixed(1)} pips
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm text-gray-400">
-              {evaluation.win
-                ? 'エントリー後に有利な方向へ動きました。利確・損切りのタイミングも意識してみましょう。'
-                : 'エントリー後に不利な方向へ動きました。エントリー直前のトレンドや反発ポイントを振り返ってみましょう。'}
-            </div>
-
-            <button
-              onClick={startNext}
-              className="w-full rounded-xl bg-[var(--color-accent)] py-3.5 text-base font-bold text-black active:scale-[0.98]"
-            >
-              次の問題へ
-            </button>
-          </div>
-        )}
+        <button
+          onClick={newChart}
+          className="mt-4 w-full rounded-xl border-2 border-[var(--color-accent)] py-3.5 text-base font-bold text-[var(--color-accent)] active:scale-[0.98]"
+        >
+          別のチャートで練習する
+        </button>
       </div>
     </div>
   );

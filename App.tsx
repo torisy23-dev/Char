@@ -1,23 +1,78 @@
-interface ScreenHeaderProps {
-  title: string;
-  onBack?: () => void;
-  right?: React.ReactNode;
-}
+import { useState } from 'react';
+import BottomNav from './components/BottomNav';
+import { useGameProgress } from './hooks/useGameProgress';
+import HomeScreen, { type GameKey } from './screens/HomeScreen';
+import GamesScreen from './screens/GamesScreen';
+import StatsScreen from './screens/StatsScreen';
+import PredictMode from './games/PredictMode';
+import EntryGame from './games/EntryGame';
+import SupResGame from './games/SupResGame';
+import TrendGame from './games/TrendGame';
+import PatternQuiz from './games/PatternQuiz';
+import ReplayMode from './games/ReplayMode';
 
-export default function ScreenHeader({ title, onBack, right }: ScreenHeaderProps) {
+export type ScreenKey =
+  | 'home'
+  | 'games'
+  | 'replay'
+  | 'stats'
+  | 'predict'
+  | 'entry'
+  | 'supres'
+  | 'trend'
+  | 'pattern';
+
+const TAB_KEYS: ScreenKey[] = ['home', 'games', 'replay', 'stats'];
+
+export default function App() {
+  const progress = useGameProgress();
+  const [screen, setScreen] = useState<ScreenKey>('home');
+
+  const handleStartGame = (game: GameKey) => setScreen(game);
+  const backToGames = () => setScreen('games');
+
+  let content: React.ReactNode;
+
+  switch (screen) {
+    case 'home':
+      content = (
+        <HomeScreen progress={progress} onNavigate={setScreen} onStartGame={handleStartGame} />
+      );
+      break;
+    case 'games':
+      content = <GamesScreen onBack={() => setScreen('home')} onStartGame={handleStartGame} />;
+      break;
+    case 'stats':
+      content = <StatsScreen progress={progress} />;
+      break;
+    case 'replay':
+      content = <ReplayMode onBack={() => setScreen('home')} />;
+      break;
+    case 'predict':
+      content = <PredictMode progress={progress} onBack={backToGames} />;
+      break;
+    case 'entry':
+      content = <EntryGame progress={progress} onBack={backToGames} />;
+      break;
+    case 'supres':
+      content = <SupResGame progress={progress} onBack={backToGames} />;
+      break;
+    case 'trend':
+      content = <TrendGame progress={progress} onBack={backToGames} />;
+      break;
+    case 'pattern':
+      content = <PatternQuiz progress={progress} onBack={backToGames} />;
+      break;
+    default:
+      content = null;
+  }
+
+  const showNav = TAB_KEYS.includes(screen);
+
   return (
-    <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)]/95 px-3 py-3 backdrop-blur safe-top">
-      {onBack && (
-        <button
-          onClick={onBack}
-          className="flex h-11 w-11 items-center justify-center rounded-full text-xl text-gray-300 active:bg-white/10"
-          aria-label="戻る"
-        >
-          ←
-        </button>
-      )}
-      <h1 className="flex-1 truncate text-base font-bold text-gray-100">{title}</h1>
-      {right}
-    </header>
+    <div className="mx-auto min-h-screen max-w-md bg-[var(--color-bg)]">
+      {content}
+      {showNav && <BottomNav current={screen} onChange={(key) => setScreen(key)} />}
+    </div>
   );
 }
